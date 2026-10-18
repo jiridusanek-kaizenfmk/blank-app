@@ -9,25 +9,22 @@ st.set_page_config(page_title="Gestor de Dotaciones PRO", layout="wide")
 st.title("📦 Gestor Visual de Dotaciones PRO")
 st.write("Generación automatizada con separación por cuentas, códigos de picking y BBDD en la nube.")
 
-# Variables de estado (Session State) para almacenar el carrito
 if 'dotaciones' not in st.session_state:
     st.session_state.dotaciones = []
 
-# --- 1. CONFIGURACIÓN GENERAL (Barra lateral) ---
+# --- CONFIGURACIÓN GENERAL ---
 st.sidebar.header("⚙️ Datos del Envío")
 fecha_pedido = st.sidebar.date_input("Fecha del pedido")
 fecha_salida = st.sidebar.date_input("Fecha deseada de salida")
 campana = st.sidebar.text_input("Campaña")
 transporte = st.sidebar.selectbox("Tipo de Transporte", ["TIPSA", "RECOGEN"])
 
-# --- 2. CARGA DE ARCHIVOS DESDE LA NUBE ---
+# --- CARGA DE ARCHIVOS DESDE LA NUBE ---
 st.subheader("1. Bases de Datos (En vivo)")
 
-# Usamos export=csv para la BBDD porque es mucho más robusto en Google Drive
 URL_EXPORT = "https://docs.google.com/spreadsheets/d/1sglb7tI0L0TfzIz-ICY84eu5SkRL_SPz/export?format=xlsx"
 URL_USUARIOS = "https://docs.google.com/spreadsheets/d/11WxnNJa-1NNjwRqMrHb2uH2bShoCd8JrPwD-WJRcyeM/export?format=csv"
 
-# Función robusta para leer desde Google Drive
 @st.cache_data(ttl=60)
 def cargar_excel_desde_nube(url, es_csv=False):
     respuesta = requests.get(url)
@@ -45,7 +42,7 @@ try:
     with st.spinner('Cargando BBDD de usuarios...'):
         df_users = cargar_excel_desde_nube(URL_USUARIOS, es_csv=True)
     st.success("👥 BBDD de consignatarios cargada.")
-    st.info("💡 Si modificas la BBDD en Google Drive, pulsa F5 aquí para actualizar los datos.")
+    st.info("💡 Si modificas la BBDD en Google Drive, pulsa F5 aquí para actualizar.")
     
     carga_exitosa = True
 except Exception as e:
@@ -53,7 +50,7 @@ except Exception as e:
     st.write(f"Detalle técnico del error: {e}")
     carga_exitosa = False
 
-# --- 3. ASIGNACIÓN A USUARIO ---
+# --- ASIGNACIÓN A USUARIO ---
 if carga_exitosa:
     st.markdown("---")
     st.subheader("2. Asignación")
@@ -76,7 +73,6 @@ if carga_exitosa:
                 desc = str(row['Descripción (1)']).strip()
                 departamento = str(row.get('Código de departamento', '')).strip().upper()
                 
-                # Mapear cuenta
                 if "METAGPV" in departamento:
                     cuenta_id = "212"
                 elif "METAPROMO" in departamento:
@@ -94,12 +90,7 @@ if carga_exitosa:
                     if qty > 0:
                         row = df_export.loc[idx]
                         departamento = str(row.get('Código de departamento', '')).strip().upper()
-                        if "METAGPV" in departamento:
-                            cuenta_id = "212"
-                        elif "METAPROMO" in departamento:
-                            cuenta_id = "216"
-                        else:
-                            cuenta_id = departamento
+                        cuenta_id = "212" if "METAGPV" in departamento else ("216" if "METAPROMO" in departamento else departamento)
                         
                         st.session_state.dotaciones.append({
                             'CUENTA': cuenta_id,
@@ -121,7 +112,7 @@ if carga_exitosa:
                     st.success(f"✅ Añadidos {agregados} productos a {usuario_seleccionado}.")
                     st.rerun()
 
-# --- 4. GENERACIÓN DE EXCELS ---
+# --- GENERACIÓN DE EXCELS ---
 if st.session_state.dotaciones:
     st.markdown("---")
     st.subheader("📋 Resumen de Dotaciones")
@@ -135,15 +126,12 @@ if st.session_state.dotaciones:
 
     st.markdown("### 📥 Descargar Plantillas")
     
-    # Asignar Códigos de Picking
     usuarios_unicos = df_carrito['CONSIGNATARIO'].unique()
     mapa_picking = {usuario: f"PICK-{i+1:03d}" for i, usuario in enumerate(usuarios_unicos)}
-
     cuentas_presentes = df_carrito['CUENTA'].unique()
     
     for cuenta in cuentas_presentes:
         df_cuenta = df_carrito[df_carrito['CUENTA'] == cuenta].copy()
-        
         columnas_dot = ['FECHA', 'CUENTA', 'CAMPAÑA', 'FECHA DESEADA DE SALIDA', 'CONSIGNATARIO', 
                         'DIRECCION DEL CONSIGNATARIO', 'CP', 'PROVINCIA', 'POBLACION', 'CODIGO PICKING', 
                         'REFERENCIA', 'CANTIDAD', 'NOTAS', 'TIPO DE TRANSPORTE', 'TIPO ERROR', 
@@ -187,4 +175,4 @@ if st.session_state.dotaciones:
             file_name=f"Dotaciones_{cuenta}_{datetime.now().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"download_{cuenta}"
-        ) 
+        )
