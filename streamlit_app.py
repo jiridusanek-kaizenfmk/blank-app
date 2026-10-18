@@ -6,48 +6,71 @@ from datetime import datetime
 st.set_page_config(page_title="Gestor de Dotaciones PRO", layout="wide")
 
 st.title("📦 Gestor Visual de Dotaciones PRO")
-st.write("Generación automatizada con separación por cuentas y códigos de picking.")
+st.write("Generación automatizada con separación por cuentas, códigos de picking y BBDD en la nube.")
 
-# Variables de estado
+# Variables de estado (Session State) para almacenar el carrito
 if 'dotaciones' not in st.session_state:
     st.session_state.dotaciones = []
 
-# --- 1. CONFIGURACIÓN GENERAL ---
+# --- 1. CONFIGURACIÓN GENERAL (Barra lateral) ---
 st.sidebar.header("⚙️ Datos del Envío")
 fecha_pedido = st.sidebar.date_input("Fecha del pedido")
 fecha_salida = st.sidebar.date_input("Fecha deseada de salida")
 campana = st.sidebar.text_input("Campaña")
 transporte = st.sidebar.selectbox("Tipo de Transporte", ["TIPSA", "RECOGEN"])
 
-# --- 2. CARGA DE ARCHIVOS ---
-col1, col2 = st.columns(2)
-with col1:
-    st.subheader("1. Carga de Archivos")
-    file_usuarios = st.file_uploader("Sube tu BBDD de Usuarios (usuarios.xlsx)", type=['xlsx'])
-    file_export = st.file_uploader("Sube el Export del Almacén", type=['xlsx'])
+# --- 2. CARGA DE ARCHIVOS DESDE LA NUBE ---
+st.subheader("1. Bases de Datos (En vivo)")
 
-if file_usuarios is not None and file_export is not None:
-    df_users = pd.read_excel(file_usuarios)
-    df_export = pd.read_excel(file_export).dropna(subset=['Código de artículo'])
+# Enlaces convertidos para descarga automática
+URL_EXPORT = "https://docs.google.com/spreadsheets/d/1sglb7tI0L0TfzIz-ICY84eu5SkRL_SPz/export?format=xlsx"
+URL_USUARIOS = "https://docs.google.com/spreadsheets/d/11WxnNJa-1NNjwRqMrHb2uH2bShoCd8JrPwD-WJRcyeM/export?format=xlsx"
+
+try:
+    with st.spinner('Cargando catálogo del almacén...'):
+        df_export = pd.read_excel(URL_EXPORT).dropna(subset=['Código de artículo'])
+    st.success("📦 Catálogo del almacén cargado.")
+
+    with st.spinner('Cargando BBDD de usuarios...'):
+        df_users = pd.read_excel(URL_USUARIOS)
+    st.success("👥 BBDD de consignatarios cargada.")
+    st.info("💡 Si modificas la BBDD en Google Drive, pulsa F5 aquí para actualizar los datos.")
     
-    with col2:
-        st.subheader("2. Asignación a Usuario")
-        usuario_seleccionado = st.selectbox("Selecciona el Consignatario", ["-- Seleccionar --"] + df_users['Nombre'].tolist())
+    carga_exitosa = True
+except Exception as e:
+    st.error("⚠️ Error al conectar con la nube. Comprueba que el enlace de la BBDD esté puesto en 'Cualquier persona con el enlace'.")
+    carga_exitosa = False
+
+# --- 3. ASIGNACIÓN A USUARIO ---
+if carga_exitosa:
+    st.markdown("---")
+    st.subheader("2. Asignación")
+    
+    lista_nombres = df_users['Nombre'].dropna().tolist()
+    usuario_seleccionado = st.selectbox("Selecciona el Consignatario", ["-- Seleccionar --"] + lista_nombres)
 
     if usuario_seleccionado != "-- Seleccionar --":
         st.markdown("---")
         st.subheader(f"🛒 Productos para: {usuario_seleccionado}")
+        
         user_data = df_users[df_users['Nombre'] == usuario_seleccionado].iloc[0]
 
         with st.form("form_productos"):
+            st.write("Indica la cantidad (deja en 0 lo que no quieras).")
             cantidades = {}
+            
             for index, row in df_export.iterrows():
                 codigo = str(row['Código de artículo']).strip()
                 desc = str(row['Descripción (1)']).strip()
-                departamento = str(row['Código de departamento']).strip().upper()
+                departamento = str(row.get('Código de departamento', '')).strip().upper()
                 
-                # Mapear la cuenta automáticamente según el departamento
-                cuenta_id = "212" if "METAGPV" in departamento else ("216" if "METAPROMO" in departamento else departamento)
+                # Mapear cuenta
+                if "METAGPV" in departamento:
+                    cuenta_id = "212"
+                elif "METAPROMO" in departamento:
+                    cuenta_id = "216"
+                else:
+                    cuenta_id = departamento
 
                 c1, c2 = st.columns([5, 2])
                 c1.write(f"**{codigo}** - {desc} *(Cuenta: {cuenta_id})*")
@@ -58,8 +81,13 @@ if file_usuarios is not None and file_export is not None:
                 for idx, qty in cantidades.items():
                     if qty > 0:
                         row = df_export.loc[idx]
-                        departamento = str(row['Código de departamento']).strip().upper()
-                        cuenta_id = "212" if "METAGPV" in departamento else ("216" if "METAPROMO" in departamento else departamento)
+                        departamento = str(row.get('Código de departamento', '')).strip().upper()
+                        if "METAGPV" in departamento:
+                            cuenta_id = "212"
+                        elif "METAPROMO" in departamento:
+                            cuenta_id = "216"
+                        else:
+                            cuenta_id = departamento
                         
                         st.session_state.dotaciones.append({
                             'CUENTA': cuenta_id,
@@ -78,10 +106,10 @@ if file_usuarios is not None and file_export is not None:
                         })
                         agregados += 1
                 if agregados > 0:
-                    st.success(f"✅ Añadidos {agregados} productos. ¡Puedes seguir añadiendo a otros usuarios!")
+                    st.success(f"✅ Añadidos {agregados} productos a {usuario_seleccionado}.")
                     st.rerun()
 
-# --- 3. GENERACIÓN DE EXCELS ---
+# --- 4. GENERACIÓN DE EXCELS ---
 if st.session_state.dotaciones:
     st.markdown("---")
     st.subheader("📋 Resumen de Dotaciones")
@@ -89,18 +117,16 @@ if st.session_state.dotaciones:
     df_carrito = pd.DataFrame(st.session_state.dotaciones)
     st.dataframe(df_carrito[['CUENTA', 'CONSIGNATARIO', 'REFERENCIA', 'DESCRIPCION', 'CANTIDAD']])
     
-    if st.button("🗑️ Limpiar todo"):
+    if st.button("🗑️ Limpiar carrito"):
         st.session_state.dotaciones = []
         st.rerun()
 
     st.markdown("### 📥 Descargar Plantillas")
-    st.write("Si hay productos de múltiples cuentas, se generarán archivos separados.")
     
-    # Asignar Códigos de Picking únicos por Consignatario
+    # Asignar Códigos de Picking
     usuarios_unicos = df_carrito['CONSIGNATARIO'].unique()
     mapa_picking = {usuario: f"PICK-{i+1:03d}" for i, usuario in enumerate(usuarios_unicos)}
 
-    # Separar por cuentas y generar Excels
     cuentas_presentes = df_carrito['CUENTA'].unique()
     
     for cuenta in cuentas_presentes:
@@ -127,7 +153,7 @@ if st.session_state.dotaciones:
                 'CODIGO PICKING': mapa_picking[row['CONSIGNATARIO']],
                 'REFERENCIA': row['REFERENCIA'],
                 'CANTIDAD': row['CANTIDAD'],
-                'NOTAS': row['DESCRIPCION'], # El nombre del producto en las notas
+                'NOTAS': row['DESCRIPCION'],
                 'TIPO DE TRANSPORTE': transporte,
                 'TIPO ERROR': '',
                 'PAIS': row['PAIS'],
@@ -137,18 +163,16 @@ if st.session_state.dotaciones:
                 'EMAIL CONTACTO': row['EMAIL']
             }
         
-        # Buffer de memoria para el Excel
+        df_final = df_final.fillna("")
+        
         buffer = io.BytesIO()
         with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            # Plantilla: empieza en la fila 1 (index 0) para encabezados, como en una tabla limpia.
-            # Puedes ajustar startrow=1 si tu plantilla exige la fila 1 vacía.
             df_final.to_excel(writer, sheet_name='DOT', index=False, startrow=1)
         
-        # Botón de descarga dinámico por cada cuenta
         st.download_button(
-            label=f"⬇️ Descargar Excel para Cuenta {cuenta}",
+            label=f"⬇️ Descargar Excel (Cuenta: {cuenta})",
             data=buffer.getvalue(),
-            file_name=f"Plantilla_Dotaciones_Cuenta_{cuenta}_{datetime.now().strftime('%Y%m%d')}.xlsx",
+            file_name=f"Dotaciones_{cuenta}_{datetime.now().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"download_{cuenta}"
         )
