@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
+import requests
 from datetime import datetime
 
 st.set_page_config(page_title="Gestor de Dotaciones PRO", layout="wide")
@@ -22,23 +23,34 @@ transporte = st.sidebar.selectbox("Tipo de Transporte", ["TIPSA", "RECOGEN"])
 # --- 2. CARGA DE ARCHIVOS DESDE LA NUBE ---
 st.subheader("1. Bases de Datos (En vivo)")
 
-# Enlaces convertidos para descarga automática
+# Usamos export=csv para la BBDD porque es mucho más robusto en Google Drive
 URL_EXPORT = "https://docs.google.com/spreadsheets/d/1sglb7tI0L0TfzIz-ICY84eu5SkRL_SPz/export?format=xlsx"
-URL_USUARIOS = "https://docs.google.com/spreadsheets/d/11WxnNJa-1NNjwRqMrHb2uH2bShoCd8JrPwD-WJRcyeM/export?format=xlsx"
+URL_USUARIOS = "https://docs.google.com/spreadsheets/d/11WxnNJa-1NNjwRqMrHb2uH2bShoCd8JrPwD-WJRcyeM/export?format=csv"
+
+# Función robusta para leer desde Google Drive
+@st.cache_data(ttl=60)
+def cargar_excel_desde_nube(url, es_csv=False):
+    respuesta = requests.get(url)
+    respuesta.raise_for_status()
+    if es_csv:
+        return pd.read_csv(io.StringIO(respuesta.content.decode('utf-8')))
+    else:
+        return pd.read_excel(io.BytesIO(respuesta.content))
 
 try:
     with st.spinner('Cargando catálogo del almacén...'):
-        df_export = pd.read_excel(URL_EXPORT).dropna(subset=['Código de artículo'])
+        df_export = cargar_excel_desde_nube(URL_EXPORT, es_csv=False).dropna(subset=['Código de artículo'])
     st.success("📦 Catálogo del almacén cargado.")
 
     with st.spinner('Cargando BBDD de usuarios...'):
-        df_users = pd.read_excel(URL_USUARIOS)
+        df_users = cargar_excel_desde_nube(URL_USUARIOS, es_csv=True)
     st.success("👥 BBDD de consignatarios cargada.")
     st.info("💡 Si modificas la BBDD en Google Drive, pulsa F5 aquí para actualizar los datos.")
     
     carga_exitosa = True
 except Exception as e:
-    st.error("⚠️ Error al conectar con la nube. Comprueba que el enlace de la BBDD esté puesto en 'Cualquier persona con el enlace'.")
+    st.error("⚠️ Error al conectar con la nube.")
+    st.write(f"Detalle técnico del error: {e}")
     carga_exitosa = False
 
 # --- 3. ASIGNACIÓN A USUARIO ---
