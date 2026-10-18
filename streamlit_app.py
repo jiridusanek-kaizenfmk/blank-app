@@ -187,4 +187,4 @@ if st.session_state.dotaciones:
             file_name=f"Dotaciones_{cuenta}_{datetime.now().strftime('%Y%m%d')}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key=f"download_{cuenta}"
-        )
+        ) 
